@@ -1,0 +1,16 @@
+# Local inventory, backups and generated artifacts must never be committed.
+/data/
+/app/data/
+Backups/
+CodeBackups/
+/app/Tests/
+.test-results/
+.build/
+dist/
+*.csv
+*.log
+*.lnk
+*.exe
+*.zip
+*.sha256
+.vs/

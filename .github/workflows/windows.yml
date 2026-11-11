@@ -1,0 +1,36 @@
+name: Windows build and checks
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  windows:
+    runs-on: windows-2022
+    timeout-minutes: 15
+    defaults:
+      run:
+        shell: powershell
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Test backup and restore with an in-memory registry
+        run: .\tests\Test-Core.ps1
+      - name: Read-only scan and WPF smoke check
+        run: .\app\Manager.ps1 -SmokeTest
+      - name: Build portable package
+        run: .\scripts\Build.ps1
+      - name: Verify release contents and checksum
+        run: .\scripts\Verify-Package.ps1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: windows-context-menu-manager-win-x64
+          path: |
+            dist/*.zip
+            dist/*.sha256
+          if-no-files-found: error
+          retention-days: 14
