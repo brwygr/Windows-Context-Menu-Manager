@@ -34,3 +34,72 @@ jobs:
             dist/*.sha256
           if-no-files-found: error
           retention-days: 14
+  release:
+    needs: windows
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    runs-on: windows-2022
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    concurrency:
+      group: release-${{ github.ref }}
+      cancel-in-progress: false
+    defaults:
+      run:
+        shell: powershell
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      - name: Check version tag
+        run: |
+          $version = (Get-Content VERSION -Raw).Trim()
+          if ($env:GITHUB_REF_NAME -cne "v$version") {
+            throw "Tag must match VERSION: v$version"
+          }
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+        with:
+          name: windows-context-menu-manager-win-x64
+          path: dist
+
+      - name: Verify downloaded package
+        run: .\scripts\Verify-Package.ps1
+
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $tag = $env:GITHUB_REF_NAME
+          $repo = $env:GITHUB_REPOSITORY
+          $version = (Get-Content VERSION -Raw).Trim()
+          $zip = "dist/WindowsContextMenuManager-$version-win-x64.zip"
+
+          $releases = gh api --paginate "repos/$repo/releases?per_page=100" --jq '.[] | {tag_name, draft} | @json'
+          if ($LASTEXITCODE -ne 0) { throw 'Cannot check existing releases.' }
+          $existing = @($releases | ForEach-Object { $_ | ConvertFrom-Json } | Where-Object { $_.tag_name -ceq $tag })
+          if ($existing.Count -gt 0) {
+            if ($existing[0].draft) { throw 'A draft already exists. Review it in Releases before retrying.' }
+            Write-Host 'This version is already published; leaving it unchanged.'
+            exit 0
+          }
+
+          $createArguments = @(
+            'release', 'create', $tag, $zip, "$zip.sha256",
+            '--repo', $repo, '--verify-tag', '--draft',
+            '--generate-notes', '--title', $tag
+          )
+          if ($tag.Contains('-')) { $createArguments += '--prerelease' }
+          & gh @createArguments
+          if ($LASTEXITCODE -ne 0) { throw 'Creating the release draft or uploading files failed.' }
+
+          $publishArguments = @('release', 'edit', $tag, '--repo', $repo, '--draft=false')
+          if ($tag.Contains('-')) {
+            $publishArguments += '--latest=false'
+          } else {
+            $publishArguments += '--latest'
+          }
+          & gh @publishArguments
+          if ($LASTEXITCODE -ne 0) { throw 'Publishing the release failed.' }
